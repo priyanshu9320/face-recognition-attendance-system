@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Face Recognition Attendance System</title>
+  <style>
+    body { font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; background: #f4f6f8; }
+    header { background: #2c3e50; color: #fff; padding: 20px; text-align: center; }
+    nav { background: #34495e; display: flex; justify-content: center; }
+    nav button { background: none; color: white; padding: 14px 20px; font-size: 16px; border: none; cursor: pointer; }
+    nav button:hover, nav button.active { background-color: #1abc9c; }
+    .container { display: flex; flex-direction: column; align-items: center; padding: 30px; max-width: 800px; margin: 0 auto; }
+    section { display: none; width: 100%; max-width: 500px; text-align: center; }
+    section.active { display: block; }
+    input, button { display: block; margin: 10px auto; padding: 10px; font-size: 16px; width: 80%; max-width: 400px; }
+    video, img { width: 100%; max-width: 320px; border: 2px solid #ccc; margin: 10px auto; }
+    canvas { display: none; }
+    table { border-collapse: collapse; margin: 20px auto; width: 90%; }
+    th, td { padding: 10px; border: 1px solid #ccc; text-align: left; }
+    #status, #markStatus { font-weight: bold; margin-top: 10px; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>AttendPro</h1>
+  </header>
+
+  <nav>
+    <button class="tab-btn active" data-tab="register">Register User</button>
+    <button class="tab-btn" data-tab="mark">Mark Attendance</button>
+    <button class="tab-btn" data-tab="records">Attendance Records</button>
+  </nav>
+
+  <div class="container">
+    <!-- Register Student -->
+    <section id="register" class="active">
+      <h2>Register User</h2>
+      <video id="video" autoplay></video>
+      <button id="capture">Capture</button>
+      <canvas id="canvas" width="320" height="240"></canvas>
+      <img id="imagePreview" alt="Captured Image">
+      <form id="registerForm">
+        <input type="text" id="name" placeholder="User Name" required>
+        <input type="email" id="email" placeholder="User Email" required>
+        <button type="submit">Register</button>
+      </form>
+      <p id="status"></p>
+    </section>
+
+    <!-- Mark Attendance -->
+    <section id="mark">
+      <h2>Mark Attendance</h2>
+      <video id="markVideo" autoplay></video>
+      <p id="markStatus"></p>
+    </section>
+
+    <!-- Attendance Records -->
+    <section id="records">
+      <h2>Attendance Records</h2>
+      <button id="loadRecords">Load Records</button>
+      <table id="recordsTable">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>User ID</th>
+            <th>Date</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </div>
+
+  <script>
+    const tabs = document.querySelectorAll(".tab-btn");
+    const sections = document.querySelectorAll("section");
+
+    tabs.forEach(tab => {
+      tab.addEventListener("click", () => {
+        tabs.forEach(t => t.classList.remove("active"));
+        sections.forEach(s => s.classList.remove("active"));
+        tab.classList.add("active");
+        document.getElementById(tab.dataset.tab).classList.add("active");
+      });
+    });
+
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const imagePreview = document.getElementById("imagePreview");
+    const captureBtn = document.getElementById("capture");
+
+    navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+      video.srcObject = stream;
+    });
+
+    captureBtn.addEventListener("click", () => {
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      imagePreview.src = canvas.toDataURL("image/jpeg");
+    });
+
+    document.getElementById("registerForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const nameField = document.getElementById("name");
+      const emailField = document.getElementById("email");
+      const name = nameField.value;
+      const email = emailField.value;
+      const blob = await (await fetch(canvas.toDataURL("image/jpeg"))).blob();
+      const formData = new FormData();
+      formData.append("name", name);
+      formData.append("email", email);
+      formData.append("image", blob, "capture.jpg");
+
+      const res = await fetch("/register", {
+        method: "POST",
+        body: formData
+      });
+      const result = await res.json();
+      const status = document.getElementById("status");
+      if (result.status === "success") {
+        status.innerText = "✅ Registered!";
+        // Clear input fields and image preview after successful registration
+        nameField.value = "";
+        emailField.value = "";
+        imagePreview.src = "";
+        canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+      } else {
+        status.innerText = "❌ Failed to register.";
+      }
+    });
+
+    const markVideo = document.getElementById("markVideo");
+    navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+      markVideo.srcObject = stream;
+    });
+
+    function autoMarkAttendance() {
+      const markSection = document.getElementById("mark");
+      const isSectionActive = markSection.classList.contains("active");
+      if (!isSectionActive) return;
+
+      const canvas = document.createElement("canvas");
+      canvas.width = markVideo.videoWidth;
+      canvas.height = markVideo.videoHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(markVideo, 0, 0);
+      canvas.toBlob(async (blob) => {
+        const formData = new FormData();
+        formData.append("frame", blob, "frame.jpg");
+        formData.append("section_open", isSectionActive);
+
+        const res = await fetch("/mark", {
+          method: "POST",
+          body: formData
+        });
+
+        const result = await res.json();
+        const markStatus = document.getElementById("markStatus");
+        if (result.status === "marked") {
+          markStatus.innerText = `✅ Attendance marked for ${result.name}`;
+        } else if (result.status === "recently_marked") {
+          markStatus.innerText = `⏳ Attendance already marked within 30 minutes for ${result.name}`;
+        } else if (result.status === "section_closed") {
+          markStatus.innerText = `⚠️ Attendance not marked—Mark Attendance section is closed.`;
+        } else if (result.status === "unrecognized") {
+          markStatus.innerText = "⚠️ Face not recognized.";
+        }
+      }, "image/jpeg");
+    }
+
+    setInterval(autoMarkAttendance, 10000);
+
+    document.getElementById("loadRecords").addEventListener("click", async () => {
+      const res = await fetch("/records");
+      const records = await res.json();
+      const tbody = document.querySelector("#recordsTable tbody");
+      tbody.innerHTML = "";
+      records.forEach(r => {
+        const row = document.createElement("tr");
+        row.innerHTML = `<td>${r.name}</td><td>${r.user_id}</td><td>${r.date}</td><td>${r.time}</td>`;
+        tbody.appendChild(row);
+      });
+    });
+  </script>
+</body>
+</html>
